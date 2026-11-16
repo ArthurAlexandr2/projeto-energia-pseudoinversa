@@ -1,46 +1,44 @@
 #!/usr/bin/env python3
-"""Projeto Final: energia de eletrodomesticos por regressao linear.
+"""Consumo de eletrodomesticos por regressao linear e pseudoinversa.
 
-Adaptacao didatica de Candanedo, Feldheim e Deramaix (2017),
-sem reproduzir seu protocolo experimental.
-
-Execucao reproduzivel com matriz de medicoes, pseudoinversa de
-Moore-Penrose e erro quadratico medio (conteudos da disciplina).
-
-Uso: python reproduzir_projeto.py --csv dados/energydata_complete.csv --destino resultados
-Saidas: metricas em JSON e tabela CSV. O relatorio oficial nao e alterado.
+Execute: python reproduzir_projeto.py
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
+import io
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
 MODELOS = {
     "M0": [],
     "M1": ["T_out", "RH_out"],
     "M2": ["T_out", "RH_out", "T1", "RH_1"],
 }
 N_BASE_REAL = 19735
-SHA256_BASE_REAL = "2820bf712ad0275cb18b85a05250926100d8e65ebb9f4d2d016ca91ea152a25d"
+# Derivado do CSV original UCI validado, substituindo somente CRLF por LF.
+SHA256_BASE_CANONICA = "e7601453ceb2f346d6d721480d74438422705ce5ac5c504c1addfac540dff413"
+
+
+def sha256_canonico(conteudo: bytes) -> str:
+    """Normaliza apenas CRLF para LF, sem alterar os demais bytes do CSV."""
+    return hashlib.sha256(conteudo.replace(b"\r\n", b"\n")).hexdigest()
 
 
 def ler_validar(csv: Path) -> tuple[pd.DataFrame, dict]:
     if not csv.is_file():
         raise FileNotFoundError(csv)
-    df = pd.read_csv(csv, low_memory=False)
+    conteudo = csv.read_bytes()
+    df = pd.read_csv(io.BytesIO(conteudo), low_memory=False)
     colunas = ["date", "Appliances", "T_out", "RH_out", "T1", "RH_1"]
     ausentes = [c for c in colunas if c not in df.columns]
     if ausentes:
         raise ValueError("Colunas essenciais ausentes: " + ", ".join(ausentes))
     if len(df) != N_BASE_REAL:
-        raise ValueError(
-            f"A base oficial completa tem {N_BASE_REAL} linhas; arquivo recebido tem {len(df)}. "
-            "Nao vou usar uma base parcial ou simulada como se fosse a original."
-        )
+        raise ValueError(f"Esperados {N_BASE_REAL} registros; encontrados {len(df)}.")
     df["date"] = pd.to_datetime(df["date"], errors="raise")
     for c in colunas[1:]:
         df[c] = pd.to_numeric(df[c], errors="raise")
@@ -53,19 +51,14 @@ def ler_validar(csv: Path) -> tuple[pd.DataFrame, dict]:
     df = df.sort_values("date").reset_index(drop=True)
     if df["date"].duplicated().any():
         raise ValueError("Datas duplicadas no CSV.")
-    sha = hashlib.sha256(csv.read_bytes()).hexdigest()
-    if sha != SHA256_BASE_REAL:
+    sha_canonico = sha256_canonico(conteudo)
+    if sha_canonico != SHA256_BASE_CANONICA:
         raise ValueError("SHA-256 divergente: use o CSV original UCI, sem alteracoes.")
-    meta = {
-        "fonte": "UCI Machine Learning Repository, Appliances Energy Prediction (id=374)",
-        "csv": csv.name,
-        "sha256": sha,
-        "n_observacoes": int(len(df)),
-        "inicio": str(df["date"].iloc[0]),
-        "fim": str(df["date"].iloc[-1]),
-        "variavel_alvo": "Appliances (Wh por intervalo de 10 minutos)",
+    hashes = {
+        "sha256": hashlib.sha256(conteudo).hexdigest(),
+        "sha256_canonico": sha_canonico,
     }
-    return df, meta
+    return df, hashes
 
 
 def construir_X(df: pd.DataFrame, variaveis: list[str]) -> np.ndarray:
@@ -100,59 +93,46 @@ def separar_treino_teste(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def analisar(df: pd.DataFrame) -> dict:
     treino, teste = separar_treino_teste(df)
-    yt = treino["Appliances"].to_numpy(float)
-    yv = teste["Appliances"].to_numpy(float)
+    y_treino = treino["Appliances"].to_numpy(float)
+    y_teste = teste["Appliances"].to_numpy(float)
     modelos = {}
-    for nome, vars_ in MODELOS.items():
-        xt = construir_X(treino, vars_)
-        xv = construir_X(teste, vars_)
-        w = np.linalg.pinv(xt) @ yt
+    for nome, variaveis in MODELOS.items():
+        x_treino = construir_X(treino, variaveis)
+        x_teste = construir_X(teste, variaveis)
+        w = np.linalg.pinv(x_treino) @ y_treino
+        previsao_treino = x_treino @ w
+        previsao_teste = x_teste @ w
         modelos[nome] = {
-            "colunas_X": ["intercepto", *vars_],
-            "coeficientes": [float(z) for z in w],
-            "n_coeficientes": int(w.size),
-            "posto_X_treino": int(np.linalg.matrix_rank(xt)),
-            "EQM_treino_Wh2": calcular_eqm(yt, xt @ w),
-            "EQM_teste_Wh2": calcular_eqm(yv, xv @ w),
-            "previsoes_negativas_teste": int(np.sum((xv @ w) < 0)),
+            "coeficientes": w.tolist(),
+            "EQM_treino_Wh2": calcular_eqm(y_treino, previsao_treino),
+            "EQM_teste_Wh2": calcular_eqm(y_teste, previsao_teste),
         }
     e0, e1, e2 = [modelos[k]["EQM_teste_Wh2"] for k in ("M0", "M1", "M2")]
     return {
         "n_treino": len(treino),
         "n_teste": len(teste),
-        "inicio_teste": str(teste["date"].iloc[0]),
         "modelos": modelos,
-        "ganho_M1_vs_M0_pct": 100 * (e0 - e1) / e0,
         "ganho_M2_vs_M1_pct": 100 * (e1 - e2) / e1,
-        "melhor_EQM_teste": min(modelos, key=lambda k: modelos[k]["EQM_teste_Wh2"]),
+        "ganho_M2_vs_M0_pct": 100 * (e0 - e2) / e0,
     }
 
 
 def executar(cli=None) -> int:
-    parser = argparse.ArgumentParser(description="Reproduzir metricas e tabela por pseudoinversa, preservando o relatorio oficial.")
+    parser = argparse.ArgumentParser(description="Regressao linear por pseudoinversa na base UCI.")
     raiz = Path(__file__).resolve().parent
     parser.add_argument("--csv", type=Path, default=raiz / "dados" / "energydata_complete.csv", help="CSV original UCI")
-    parser.add_argument("--destino", type=Path, default=raiz / "resultados", help="Pasta para JSON e tabela CSV")
     args = parser.parse_args(cli)
-    df, metadados = ler_validar(args.csv)
+    df, _ = ler_validar(args.csv)
     resultados = analisar(df)
-    info = {"dados": metadados, "avaliacao": resultados, "metodologia": "pseudoinversa Moore-Penrose; modelos predefinidos; separacao cronologica 80/20; EQM"}
-    # Somente arquivos numericos sao gravados. DOCX/PDF nunca sao abertos para escrita.
-    args.destino.mkdir(parents=True, exist_ok=True)
-    jsonpath = args.destino / "metricas_energia_reais.json"
-    jsonpath.write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tabela = pd.DataFrame([
-        {"modelo": nome, "n_coeficientes": valores["n_coeficientes"],
-         "EQM_treino_Wh2": valores["EQM_treino_Wh2"], "EQM_teste_Wh2": valores["EQM_teste_Wh2"]}
-        for nome, valores in resultados["modelos"].items()
-    ])
-    csvpath = args.destino / "tabela_eqm.csv"
-    tabela.to_csv(csvpath, index=False, encoding="utf-8", lineterminator="\n")
-    print(tabela.to_string(index=False))
-    print(f"Treino: {resultados['n_treino']}; teste: {resultados['n_teste']}")
-    print(f"Reducao M2/M1: {resultados['ganho_M2_vs_M1_pct']:.8f}%")
-    print("JSON:", jsonpath)
-    print("Tabela:", csvpath)
+    print(f"Registros: {len(df)}; treino: {resultados['n_treino']}; teste: {resultados['n_teste']}")
+    print(f"{'Modelo':<8} {'EQM treino (Wh2)':>22} {'EQM teste (Wh2)':>22}")
+    for nome, modelo in resultados["modelos"].items():
+        print(f"{nome:<8} {modelo['EQM_treino_Wh2']:22.12f} {modelo['EQM_teste_Wh2']:22.12f}")
+    print("\nCoeficientes de M2:")
+    for coluna, valor in zip(["intercepto", *MODELOS["M2"]], resultados["modelos"]["M2"]["coeficientes"]):
+        print(f"  {coluna:<12} {valor:.12f}")
+    print(f"\nReducao do EQM de M2 ante M1: {resultados['ganho_M2_vs_M1_pct']:.8f}%")
+    print(f"Reducao do EQM de M2 ante M0: {resultados['ganho_M2_vs_M0_pct']:.8f}%")
     return 0
 
 

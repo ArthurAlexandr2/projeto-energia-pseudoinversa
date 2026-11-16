@@ -1,99 +1,66 @@
-# Estimativa do consumo de eletrodomésticos por pseudoinversa
+# Estimativa do Consumo de Eletrodomésticos por Regressão Linear com Pseudoinversa
 
-**Projeto Final — Álgebra Linear e Teoria da Informação, Insper**  
-**Autor:** Arthur Alexandre · `arthuracc@al.insper.edu.br`
+**Arthur Alexandre — Álgebra Linear e Teoria da Informação, Insper**
 
-## Problema e pergunta científica
+Professor Tiago Fernandes Tavares · arthuracc@al.insper.edu.br
 
-Medições de temperatura e umidade dentro de uma residência ajudam a estimar o consumo de energia dos eletrodomésticos? Em particular, investigamos se incluir sensores da **cozinha** melhora o ajuste obtido usando somente condições meteorológicas externas.
+O projeto investiga se medições de temperatura e umidade da cozinha ajudam a estimar a energia consumida pelos eletrodomésticos de uma residência, além das condições meteorológicas externas. É uma adaptação didática de Candanedo, Feldheim e Deramaix (2017), com regressão linear múltipla resolvida por pseudoinversa.
 
-O trabalho é uma **adaptação do artigo de Candanedo, Feldheim e Deramaix (2017)**, não uma reprodução integral: mantém-se a mesma base experimental e a regressão linear múltipla, mas utiliza-se apenas a **pseudoinversa de Moore–Penrose** (conteúdo da disciplina), um conjunto menor de variáveis e uma divisão temporal do conjunto de dados.
+[Relatório entregue](resultados/Projeto_Final_ArthurAlexandre.pdf) · [Repositório](https://github.com/ArthurAlexandr2/projeto-energia-pseudoinversa)
 
-## Referência científica e proveniência dos dados
+## Dados
 
-**Artigo principal:** L. M. Candanedo, V. Feldheim e D. Deramaix, “Data driven prediction models of energy use of appliances in a low-energy house,” *Energy and Buildings*, vol. 140, pp. 81–97, 2017. DOI: https://doi.org/10.1016/j.enbuild.2017.01.083.
+O arquivo `dados/energydata_complete.csv` contém as **19.735 observações** da base [Appliances Energy Prediction, UCI](https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction), de uma residência na Bélgica, entre janeiro e maio de 2016. O alvo `Appliances` é a energia dos eletrodomésticos em **Wh por intervalo de dez minutos**, não o consumo total da casa. São usados `T_out` e `RH_out` (temperatura e umidade externas) e `T1` e `RH_1` (temperatura e umidade da cozinha), em °C e %, respectivamente.
 
-**Dados:** L. M. Candanedo, *Appliances Energy Prediction*, UCI Machine Learning Repository (2017). DOI: https://doi.org/10.24432/C5VC8G. Dataset: https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction. A base pública foi distribuída sob **CC BY 4.0**; o arquivo `dados/energydata_complete.csv` é uma cópia do arquivo original, sem alterações, incluída com atribuição. Consulte `CREDITOS_E_METODOLOGIA.md`.
+A base é distribuída sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), com atribuição a Luis M. Candanedo. Nenhuma medição foi alterada.
 
-Os **19.735 registros** representam medições aproximadamente a cada 10 minutos em uma residência de baixo consumo na Bélgica, de janeiro a maio de 2016. A variável de resposta é `Appliances` (Wh por intervalo), e não o consumo de toda a casa.
+## Método
 
-## Equações e significado das matrizes
+Cada linha de X representa um intervalo; a primeira coluna contém 1 para o intercepto. O vetor y contém os consumos e w contém os coeficientes, que minimizam a soma dos quadrados dos resíduos:
 
-Para cada conjunto de variáveis, cada **linha de X** contém as medições de um intervalo; a primeira coluna contém 1 para estimar o termo constante. A resposta `y` guarda os consumos de eletrodomésticos, e `w` guarda os coeficientes.
+$$\hat w=X_{\mathrm{treino}}^+y_{\mathrm{treino}},\qquad
+\hat y_{\mathrm{teste}}=X_{\mathrm{teste}}\hat w,\qquad
+EQM=\frac{(y-\hat y)^T(y-\hat y)}{n}.$$
 
-```text
-y ≈ Xw
-w = pinv(X_treino) @ y_treino
-previsao_teste = X_teste @ w
-EQM = soma((y_real - y_estimado)^2) / n
-```
+| Modelo | Colunas de X, na ordem |
+|---|---|
+| M0 | 1: referência equivalente à média do treino |
+| M1 | 1, T_out, RH_out |
+| M2 | 1, T_out, RH_out, T1, RH_1 |
 
-A pseudoinversa encontra o ajuste de mínimos quadrados e funciona mesmo quando a matriz de medições possui mais linhas do que colunas. O programa verifica o posto das matrizes.
+Os primeiros **15.788 registros (80%)** são usados no ajuste e os últimos **3.947 (20%)** no teste. O corte cronológico reserva um bloco final para avaliação sem usar seu alvo no ajuste; não demonstra independência estatística entre observações próximas. No M2, X tem 15.788 linhas e 5 colunas no treino e 3.947 linhas e 5 colunas no teste; w tem cinco coeficientes.
 
-**Modelos:**
+As variáveis externas formam uma referência simples; a cozinha foi escolhida pelo destaque de seus sensores no artigo. Não se afirma que essas quatro variáveis sejam as melhores possíveis. O artigo compara outros modelos e conjuntos de variáveis com validação cruzada; este projeto adota pseudoinversa e corte temporal 80/20. Portanto, não reproduz integralmente seu protocolo nem compara diretamente as métricas obtidas.
 
-| Modelo | Colunas de X (na ordem) | Propósito |
-|---|---|---|
-| M0 | 1 | Referência: média do treinamento |
-| M1 | 1, T_out, RH_out | Condições meteorológicas externas |
-| M2 | 1, T_out, RH_out, T1, RH_1 | Inclusão de sensores da cozinha |
+## Resultados
 
-**Avaliação:** primeiros 15.788 registros (80%) para ajuste; últimos 3.947 (20%) para teste. Os coeficientes são calculados **somente no treino**; assim, as observações do teste não influenciam o ajuste. A divisão é cronológica, e não a validação cruzada do artigo original.
+| Modelo | EQM de teste (Wh²) |
+|---|---:|
+| M0 | 8.290,73 |
+| M1 | 8.369,69 |
+| M2 | 8.222,81 |
 
-## Resultados reais obtidos
+M1 aumentou o erro de teste em **0,95%** frente a M0. M2 reduziu o erro em **1,75%** frente a M1 e em apenas **0,82%** frente a M0: a melhora sobre uma estimativa constante é modesta.
 
-| Modelo | EQM treino (Wh²) | EQM teste (Wh²) |
-|---|---:|---:|
-| M0 | 11.065,98 | 8.290,73 |
-| M1 | 10.791,34 | 8.369,69 |
-| M2 | 10.532,01 | **8.222,81** |
+Os coeficientes são associações, não efeitos causais. Os resultados se limitam a uma residência e a um período curto; não há observação direta de ocupação ou uso de cada aparelho. Como as entradas são do mesmo intervalo do consumo, trata-se de estimação contemporânea, não previsão antecipada. O ganho observado não demonstra significância estatística.
 
-Adicionar variáveis externas isoladamente (**M1**) *aumentou* o EQM de teste em **0,95%** em relação à média de treino (**M0**). A inclusão de sensores internos (**M2**) reduziu o EQM em **1,75%** relativamente a **M1**, mas apenas **0,82%** relativamente à referência simples M0. Trata-se de um ganho real porém modesto — não evidência de forte capacidade de previsão.
+## Como executar
 
-**Interpretação:** esses coeficientes são associações do modelo, não efeitos causais. Como os sensores e o consumo são observados no mesmo intervalo, o estudo avalia a **estimação contemporânea**, não previsão operacional de horas futuras. Resultados referem-se a uma única residência e ao período observado.
-
-## Como reproduzir
-
-Requer **Python 3.10+**. Para obter o projeto:
-
-```bash
-git clone https://github.com/ArthurAlexandr2/projeto-energia-pseudoinversa.git
-cd projeto-energia-pseudoinversa
-```
-
-A partir da raiz do projeto:
+Requer Python 3.10+. Na raiz do projeto, crie um ambiente com `python -m venv .venv` e ative-o com `.\.venv\Scripts\Activate.ps1` no PowerShell ou `source .venv/bin/activate` no Linux/macOS. Depois:
 
 ```bash
 python -m pip install -r requirements.txt
-python reproduzir_projeto.py --csv dados/energydata_complete.csv --destino resultados
-python gerar_figuras.py --csv dados/energydata_complete.csv --destino resultados/figuras
+python reproduzir_projeto.py
 python -m unittest discover -s testes -v
 ```
 
-O primeiro comando de reprodução calcula e grava `resultados/metricas_energia_reais.json` e `resultados/tabela_eqm.csv`, a partir do CSV original incluído. A leitura verifica o SHA-256, os 19.735 registros, as colunas, as datas e os valores finitos. Não há download automático; se o CSV estiver ausente, restaure o original da UCI em `dados/`.
+O programa imprime os EQMs de treino e teste, os coeficientes de M2 e os ganhos percentuais. O CSV incluído permite executar sem download de dados. Para indicar outra cópia da mesma base, use `python reproduzir_projeto.py --csv caminho/energydata_complete.csv`.
 
-**Relatório oficial:** o DOCX em `resultados/` é a única fonte editável; o PDF é sua versão de entrega, com uma página e duas colunas. Os scripts não geram nem sobrescrevem esses documentos. Para atualizar o texto, edite o DOCX e exporte novamente o PDF, conferindo a paginação. Word e LibreOffice não são dependências do experimento.
+A integridade é verificada por SHA-256 após substituir **somente CRLF por LF em memória**, sem modificar o arquivo. O hash canônico esperado é `e7601453ceb2f346d6d721480d74438422705ce5ac5c504c1addfac540dff413`, derivado do original UCI validado. Alterações em valores ou em qualquer outro conteúdo continuam sendo rejeitadas. Os testes cobrem matrizes, pseudoinversa, EQM, métricas reais, LF/CRLF e adulterações.
 
-**Repositório do projeto:** [ArthurAlexandr2/projeto-energia-pseudoinversa](https://github.com/ArthurAlexandr2/projeto-energia-pseudoinversa). Não confundir esse endereço com o repositório dos autores da base.
+## Referências e autoria
 
-O segundo script gera gráficos usando **os mesmos coeficientes da pseudoinversa**. Esses gráficos são suplementares e não substituem a tabela do relatório.
+1. L. M. Candanedo, V. Feldheim e D. Deramaix. “Data driven prediction models of energy use of appliances in a low-energy house.” *Energy and Buildings*, 140, 81–97, 2017. [DOI: 10.1016/j.enbuild.2017.01.083](https://doi.org/10.1016/j.enbuild.2017.01.083).
+2. L. M. Candanedo. *Appliances Energy Prediction* [Dataset]. UCI Machine Learning Repository, 2017. [DOI: 10.24432/C5VC8G](https://doi.org/10.24432/C5VC8G).
 
-**Integridade dos dados:** SHA-256 do arquivo CSV:
-
-```text
-2820bf712ad0275cb18b85a05250926100d8e65ebb9f4d2d016ca91ea152a25d
-```
-
-## Arquivos relevantes
-
-- `reproduzir_projeto.py`: leitura, validação, matrizes, pseudoinversa, EQM e tabela CSV.
-- `gerar_figuras.py`: gráficos dos resultados reais e comparação observado/estimado.
-- `dados/energydata_complete.csv`: dados originais UCI.
-- `resultados/Projeto_Final_Energia_Arthur_IEEE.pdf`: relatório de uma página, duas colunas.
-- `resultados/metricas_energia_reais.json`: resultados numéricos com precisão total.
-- `resultados/figuras/`: figuras reproduzidas do conjunto de teste.
-- `testes/test_modelos.py`: testes automáticos do cálculo de matrizes e integridade numérica.
-- `CREDITOS_E_METODOLOGIA.md`: relação detalhada com o artigo e distinções metodológicas.
-- `ARGUICAO_ORAL.md`: roteiro de defesa matemática e limitações.
-
-**Aviso de escopo:** este repositório usa somente Álgebra Linear, regressão linear múltipla, pseudoinversa, operações matriciais e EQM. Não implementa nem reivindica os modelos avançados apresentados no artigo.
+Autor: Arthur Alexandre. Projeto desenvolvido com auxílio de IA, conforme permitido na disciplina.
