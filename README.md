@@ -54,7 +54,14 @@ Adicionar variáveis externas isoladamente (**M1**) *aumentou* o EQM de teste em
 
 ## Como reproduzir
 
-Requer **Python 3.10+**. A partir da raiz do projeto:
+Requer **Python 3.10+**. Para obter o projeto:
+
+```bash
+git clone https://github.com/ArthurAlexandr2/projeto-energia-pseudoinversa.git
+cd projeto-energia-pseudoinversa
+```
+
+A partir da raiz do projeto:
 
 ```bash
 python -m pip install -r requirements.txt
